@@ -11,6 +11,14 @@ from django.urls import reverse
 from django.utils import timezone
 from mock import patch
 
+from django_comment_common.models import (
+    FORUM_ROLE_ADMINISTRATOR,
+    FORUM_ROLE_MODERATOR,
+    FORUM_ROLE_GROUP_MODERATOR,
+    FORUM_ROLE_COMMUNITY_TA,
+    Role
+)
+from django_comment_client.tests.factories import RoleFactory
 from course_modes.tests.factories import CourseModeFactory
 from experiments.models import ExperimentKeyValue
 from xmodule.partitions.partitions import ENROLLMENT_TRACK_PARTITION_ID
@@ -38,6 +46,14 @@ from student.tests.factories import (
     CourseEnrollmentFactory,
     UserFactory,
     TEST_PASSWORD
+)
+from lms.djangoapps.courseware.tests.factories import (
+    InstructorFactory,
+    StaffFactory,
+    BetaTesterFactory,
+    OrgStaffFactory,
+    OrgInstructorFactory,
+    GlobalStaffFactory,
 )
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase, SharedModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory
@@ -424,6 +440,7 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
         BetaTesterFactory,
         OrgStaffFactory,
         OrgInstructorFactory,
+        GlobalStaffFactory,
     )
     def test_access_course_team_users(self, role_factory):
         """
@@ -432,7 +449,10 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
         # There are two types of course team members: instructor and staff
         # they have different privileges, but for the purpose of this test the important thing is that they should both
         # have access to all graded content
-        user = role_factory.create(course_key=self.course.id)
+        if role_factory == GlobalStaffFactory:
+            user = role_factory.create()
+        else:
+            user = role_factory.create(course_key=self.course.id)
         # assert that course team members have access to graded content
         _assert_block_is_gated(
             block=self.blocks_dict['problem'],
@@ -443,17 +463,19 @@ class TestProblemTypeAccess(SharedModuleStoreTestCase):
         )
 
     @ddt.data(
-        GlobalStaffFactory,
+        FORUM_ROLE_COMMUNITY_TA,
+        FORUM_ROLE_ADMINISTRATOR,
+        FORUM_ROLE_MODERATOR,
+        FORUM_ROLE_GROUP_MODERATOR
     )
-    def test_access_global_users(self, role_factory):
+    def test_access_user_with_course_role(self, role_name):
         """
-        Test that members of the course team do not lose access to graded content
+        Test that users with a given role do not lose access to graded content
         """
-        # There are two types of course team members: instructor and staff
-        # they have different privileges, but for the purpose of this test the important thing is that they should both
-        # have access to all graded content
-        user = role_factory.create()
-        # assert that course team members have access to graded content
+        user = UserFactory.create()
+        role = RoleFactory(name=role_name, course_id=self.course.id)
+        role.users.add(user)
+
         _assert_block_is_gated(
             block=self.blocks_dict['problem'],
             user_id=user.id,
@@ -666,7 +688,7 @@ class TestMessageDeduplication(ModuleStoreTestCase):
 
         self.user = UserFactory.create()
         self.request_factory = RequestFactory()
-        ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=date(2018, 1, 1))
+        ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime(2018, 1, 1))
 
     def _create_course(self):
         course = CourseFactory.create(run='test', display_name='test')
